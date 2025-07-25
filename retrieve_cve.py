@@ -1,6 +1,7 @@
 import requests
 import json
 from datetime import datetime
+from datetime import timezone
 from tqdm import tqdm
 from re import match
 import os
@@ -77,21 +78,35 @@ def parse_cves(url_base: str):
 
 # Save CVE data to JSONL file
 def save_jsonl(cve_data, today):
-    with open(CVE_FILE, 'w') as f:
+    with open(CVE_FILE, 'w', encoding='utf-8') as f:
         for cve, data in cve_data.items():
             f.write(json.dumps({cve: data}) + "\n")
     
     # Update the last update date
-    with open(UPDATE_FILE, 'w') as f:
+    with open(UPDATE_FILE, 'w', encoding='utf-8') as f:
         f.write(today)
-    
+
+def format_nvd_timestamp(dt: datetime) -> str:
+    # Make sure the datetime is in UTC and format it to the NVD standard
+    dt_utc = dt.astimezone(timezone.utc)
+    iso_date = dt_utc.strftime('%Y-%m-%dT%H:%M:%S.000')
+    return f"{iso_date}%2B00:00"
+  
 
 if __name__ == "__main__":
     # Get the last update date
-    today = datetime.now().isoformat()
-    last_update = ""
+    today = format_nvd_timestamp(datetime.now())
+
     with open(UPDATE_FILE, 'r') as f:
-        last_update = f.read()
+        last_update_raw = f.read().strip()
+
+    try:
+        last_update_dt = datetime.fromisoformat(last_update_raw.replace("Z", "+00:00"))
+        last_update = format_nvd_timestamp(last_update_dt)
+    except Exception as e:
+        print(f"[!] Failed to parse last update date: {e}. Using default fallback.")
+        last_update = format_nvd_timestamp(datetime(2021, 1, 1))  # Valeur par défaut si parsing échoue
+
     url = f"{API_CVES}?lastModStartDate={last_update}&lastModEndDate={today}"
     cves_data = parse_cves(url)
     save_jsonl(cves_data, today)
