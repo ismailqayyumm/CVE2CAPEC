@@ -338,7 +338,7 @@ async function process(page_load = false) {
                         if (document.fullscreenElement) {
                             document.exitFullscreen();
                         } else {
-                            document.documentElement.requestFullscreen();
+                            document.getElementById('container').requestFullscreen();
                         }
                     }
                 }
@@ -527,7 +527,7 @@ async function show_defend_selected() {
                         if (document.fullscreenElement) {
                             document.exitFullscreen();
                         } else {
-                            document.documentElement.requestFullscreen();
+                            document.getElementById('subgraph').requestFullscreen();
                         }
                     }
                 }
@@ -642,7 +642,7 @@ async function show_selected(selection, technique_id) {
                         if (document.fullscreenElement) {
                             document.exitFullscreen();
                         } else {
-                            document.documentElement.requestFullscreen();
+                            document.getElementById('subgraph').requestFullscreen();
                         }
                     }
                 }
