@@ -111,7 +111,7 @@ async function create_mitre_layer() {
             var tactic = tactics[j];
             var row = {
                 "techniqueID": key,
-                "tactic": tactic.toLowerCase().replace(' ', '-'),
+                "tactic": tactic.toLowerCase().replaceAll(' ', '-'),
                 "color": "",
                 "comment": "",
                 "enabled": true,
