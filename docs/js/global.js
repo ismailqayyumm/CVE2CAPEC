@@ -18,6 +18,10 @@ var chart_nodes = [];
 var chart_links = [];
 var selected_techniques = [];
 var selected_defend_techniques = [];
+var original_chart_nodes = [];
+var original_chart_links = [];
+var selected_path = null;
+var is_path_selected = false;
 
 // ===== UTILITY FUNCTIONS =====
 
@@ -64,6 +68,239 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 });
+
+// ===== SANKEY INTERACTION FUNCTIONS =====
+
+// Function to get all paths from a specific node
+function getPathsFromNode(nodeName, links) {
+    var paths = [];
+    var visited = new Set();
+    
+    function findPaths(currentNode, currentPath) {
+        if (visited.has(currentNode)) return;
+        visited.add(currentNode);
+        
+        var outgoingLinks = links.filter(link => link.source === currentNode);
+        
+        if (outgoingLinks.length === 0) {
+            // Leaf node, save the path
+            paths.push([...currentPath]);
+        } else {
+            outgoingLinks.forEach(link => {
+                currentPath.push(link);
+                findPaths(link.target, currentPath);
+                currentPath.pop();
+            });
+        }
+        
+        visited.delete(currentNode);
+    }
+    
+    findPaths(nodeName, []);
+    return paths;
+}
+
+// Function to get all paths through a specific link
+function getPathsThroughLink(selectedLink, links) {
+    var paths = [];
+    
+    // Get all paths leading to the source of the selected link
+    var incomingPaths = getPathsToNode(selectedLink.source, links);
+    
+    // Get all paths starting from the target of the selected link
+    var outgoingPaths = getPathsFromNode(selectedLink.target, links);
+    
+    // Combine paths through the selected link
+    if (incomingPaths.length === 0) {
+        // If no incoming paths, start from the selected link
+        outgoingPaths.forEach(outgoingPath => {
+            paths.push([selectedLink, ...outgoingPath]);
+        });
+        if (outgoingPaths.length === 0) {
+            // If no outgoing paths either, just the selected link
+            paths.push([selectedLink]);
+        }
+    } else {
+        incomingPaths.forEach(incomingPath => {
+            if (outgoingPaths.length === 0) {
+                // If no outgoing paths, end with the selected link
+                paths.push([...incomingPath, selectedLink]);
+            } else {
+                outgoingPaths.forEach(outgoingPath => {
+                    paths.push([...incomingPath, selectedLink, ...outgoingPath]);
+                });
+            }
+        });
+    }
+    
+    return paths;
+}
+
+// Function to get all paths leading to a specific node
+function getPathsToNode(nodeName, links) {
+    var paths = [];
+    var visited = new Set();
+    
+    function findPaths(currentNode, currentPath) {
+        if (visited.has(currentNode)) return;
+        visited.add(currentNode);
+        
+        var incomingLinks = links.filter(link => link.target === currentNode);
+        
+        if (incomingLinks.length === 0) {
+            // Root node, save the path
+            paths.push([...currentPath].reverse());
+        } else {
+            incomingLinks.forEach(link => {
+                currentPath.push(link);
+                findPaths(link.source, currentPath);
+                currentPath.pop();
+            });
+        }
+        
+        visited.delete(currentNode);
+    }
+    
+    findPaths(nodeName, []);
+    return paths;
+}
+
+// Function to filter and display selected paths
+function showSelectedPaths(selectedNode = null, selectedLink = null) {
+    var pathsToShow = [];
+    var allNodes = new Set();
+    var allLinks = new Set();
+    
+    if (selectedNode) {
+        // Find all complete paths that pass through the selected node
+        original_chart_links.forEach(link => {
+            if (link.source === selectedNode || link.target === selectedNode) {
+                // This link involves the selected node, trace complete paths
+                var completePaths = findCompletePathsContainingNode(selectedNode);
+                pathsToShow = pathsToShow.concat(completePaths);
+            }
+        });
+    } else if (selectedLink) {
+        // Find all complete paths that contain the selected link
+        var completePaths = findCompletePathsContainingLink(selectedLink);
+        pathsToShow = pathsToShow.concat(completePaths);
+    }
+    
+    // Remove duplicates and extract all links and nodes
+    var uniquePaths = [];
+    var pathSignatures = new Set();
+    
+    pathsToShow.forEach(path => {
+        var signature = path.map(link => `${link.source}->${link.target}`).join('|');
+        if (!pathSignatures.has(signature)) {
+            pathSignatures.add(signature);
+            uniquePaths.push(path);
+            
+            path.forEach(link => {
+                allLinks.add(link);
+                allNodes.add(link.source);
+                allNodes.add(link.target);
+            });
+        }
+    });
+    
+    // Update chart with filtered data
+    chart_nodes = Array.from(allNodes).map(node => ({ name: node }));
+    chart_links = Array.from(allLinks);
+    
+    updateSankeyChart();
+}
+
+// Function to find complete paths from CVE to final technique/defense
+function findCompletePathsContainingNode(nodeName) {
+    var completePaths = [];
+    
+    // Find all CVE nodes (starting points)
+    var cveNodes = original_chart_nodes
+        .map(n => n.name)
+        .filter(name => name.startsWith('CVE-'));
+    
+    // For each CVE, find paths to end nodes that pass through the selected node
+    cveNodes.forEach(cveNode => {
+        var paths = findPathsFromTo(cveNode, null, nodeName);
+        completePaths = completePaths.concat(paths);
+    });
+    
+    return completePaths;
+}
+
+// Function to find complete paths containing a specific link
+function findCompletePathsContainingLink(targetLink) {
+    var completePaths = [];
+    
+    // Find all CVE nodes (starting points)
+    var cveNodes = original_chart_nodes
+        .map(n => n.name)
+        .filter(name => name.startsWith('CVE-'));
+    
+    // For each CVE, find paths that contain the target link
+    cveNodes.forEach(cveNode => {
+        var paths = findPathsFromTo(cveNode, null, null, targetLink);
+        completePaths = completePaths.concat(paths);
+    });
+    
+    return completePaths;
+}
+
+// Enhanced path finding function
+function findPathsFromTo(startNode, endNode = null, mustContainNode = null, mustContainLink = null) {
+    var allPaths = [];
+    var visited = new Set();
+    
+    function explore(currentNode, currentPath) {
+        if (visited.has(currentNode)) return;
+        
+        var outgoingLinks = original_chart_links.filter(link => link.source === currentNode);
+        
+        if (outgoingLinks.length === 0) {
+            // End of path - check if it meets our criteria
+            if ((!endNode || currentNode === endNode) &&
+                (!mustContainNode || currentPath.some(link => link.source === mustContainNode || link.target === mustContainNode)) &&
+                (!mustContainLink || currentPath.some(link => link.source === mustContainLink.source && link.target === mustContainLink.target))) {
+                allPaths.push([...currentPath]);
+            }
+            return;
+        }
+        
+        visited.add(currentNode);
+        
+        outgoingLinks.forEach(link => {
+            currentPath.push(link);
+            explore(link.target, currentPath);
+            currentPath.pop();
+        });
+        
+        visited.delete(currentNode);
+    }
+    
+    explore(startNode, []);
+    return allPaths;
+}
+
+// Function to restore original view
+function showAllPaths() {
+    chart_nodes = [...original_chart_nodes];
+    chart_links = [...original_chart_links];
+    is_path_selected = false;
+    selected_path = null;
+    updateSankeyChart();
+}
+
+// Function to update the Sankey chart display
+function updateSankeyChart() {
+    var option = chart.getOption();
+    
+    if (option && option.series && option.series[0]) {
+        option.series[0].data = chart_nodes;
+        option.series[0].links = chart_links;
+        chart.setOption(option);
+    }
+}
 
 // ===== URL PARAMETER HANDLING =====
 
@@ -281,6 +518,10 @@ async function process(page_load = false) {
 
     chart_nodes = Array.from(chartNodes).map(node => ({ name: node }))
     chart_links = data
+    
+    // Save original data for filtering functionality
+    original_chart_nodes = [...chart_nodes];
+    original_chart_links = [...chart_links];
 
     var option = {
         tooltip: {
@@ -309,9 +550,13 @@ async function process(page_load = false) {
                     if (outgoingNodes) {
                         ret += `<u>To:</u><br>- ${outgoingNodes}`;
                     }
+                    
+                    // Add click instruction
+                    ret += `<hr class="hr-tooltip" /><small style="color: #666;"><i>🖱️ Click to filter paths</i></small>`;
+
                     return ret;
                 } else {
-                    return `${params.data.source} → ${params.data.target}: ${params.data.value}`;
+                    return `${params.data.source} → ${params.data.target}: ${params.data.value}<br><small style="color: #666;"><i>🖱️ Click to filter this path</i></small>`;
                 }
             }
         },
@@ -341,6 +586,16 @@ async function process(page_load = false) {
                             document.getElementById('container').requestFullscreen();
                         }
                     }
+                },
+                resetSelection: {
+                    show: true,
+                    title: 'Réinitialiser la sélection',
+                    icon: 'path://M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z',
+                    onclick: function () {
+                        if (is_path_selected) {
+                            showAllPaths();
+                        }
+                    }
                 }
             }
         },
@@ -367,6 +622,42 @@ async function process(page_load = false) {
 
     if (option && typeof option === 'object') {
         chart.setOption(option);
+        
+        // Add click event handlers for Sankey interaction
+        chart.off('click'); // Remove any existing click handlers
+        chart.on('click', function (params) {
+            if (params.dataType === 'node') {
+                // Node clicked
+                var nodeName = params.data.name;
+                
+                if (is_path_selected && selected_path && 
+                    (selected_path.node === nodeName || selected_path.link)) {
+                    // If already selected, restore full view
+                    showAllPaths();
+                } else {
+                    // Select paths through this node
+                    showSelectedPaths(nodeName, null);
+                    is_path_selected = true;
+                    selected_path = { node: nodeName };
+                }
+            } else if (params.dataType === 'edge') {
+                // Link clicked
+                var selectedLink = params.data;
+                
+                if (is_path_selected && selected_path && 
+                    selected_path.link && 
+                    selected_path.link.source === selectedLink.source && 
+                    selected_path.link.target === selectedLink.target) {
+                    // If the same link is clicked again, restore full view
+                    showAllPaths();
+                } else {
+                    // Select paths through this link
+                    showSelectedPaths(null, selectedLink);
+                    is_path_selected = true;
+                    selected_path = { link: selectedLink };
+                }
+            }
+        });
     }
     var cvesUrlEncoded = btoa(String.fromCharCode.apply(null, new Uint8Array(await compress(cvesArray.join(','), 'gzip'))));
     history.pushState({}, '', `?layer=${document.getElementById('layer_type').value}&input=${cvesUrlEncoded}`);
