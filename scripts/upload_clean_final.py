@@ -16,7 +16,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
-sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).parent.parent))
 from cwe2capec import fetch_capec_for_cwe
 import capec2technique
 from cve2cwe import get_parent_cwe
